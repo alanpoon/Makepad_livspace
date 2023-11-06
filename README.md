@@ -10,4 +10,4 @@ A guide to compile android apk with wasmedge.
 
 # why wasmedge sdk?
 
-In the future we can try AI interfence model using wasmedge.
+In the future we can try AI inference model using wasmedge.

@@ -20,6 +20,6 @@ lazy_static!{
     };
 }
 pub fn add_two(i:i32) -> Result<i32, Box<dyn std::error::Error>> {
-    let res = VM.run_func(Some("wasm-lib"), "addTwo", params!(i,1))?;
+    let res = VM.run_func(Some("wasm-lib"), "addTwo", params!(i,10))?;
     Ok(res[0].to_i32())
 }

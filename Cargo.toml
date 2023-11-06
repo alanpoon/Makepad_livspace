@@ -1,0 +1,14 @@
+[package]
+name = "makepad-livspace"
+version = "0.6.0"
+authors = ["Alan poon"]
+edition = "2021"
+description = "Makepad simple example"
+license = "MIT OR Apache-2.0"
+metadata.makepad-auto-version = "db3R5Gxh5Njhx8E-8kuZ2plQ1AI="
+
+[dependencies]
+makepad-widgets = { path = "../makepad/widgets", version = "0.6.0" }
+wasmedge-types = "0.4.4"
+lazy_static = "1.4.0"
+wasmedge-sdk = "0.12.0"

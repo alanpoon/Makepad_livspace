@@ -6,7 +6,7 @@ A guide to compile android apk with wasmedge.
 - untar WasmEdge-0.13.5-android_aarch64.tar.gz
 - git clone https://github.com/alanpoon/makepad
 - cargo install --path=./tools/cargo_makepad
-- WASMEDGE_DIR=../WasmEdge-0.13.5-Android cargo makepad android run -p makepad-livspace --release
+- RUST_BACKTRACE=1 WASMEDGE_DIR=/Users/alanpoon/Downloads/WasmEdge-0.13.5-Android cargo makepad android run -p makepad-livspace
 
 # why wasmedge sdk?
 

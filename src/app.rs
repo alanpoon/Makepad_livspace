@@ -213,8 +213,48 @@ impl App{
         self.navigation_destinations.insert(StackViewAction::ShowMore, live_id!(more_view));
 
     }
+    fn handle_network_response(&mut self, cx: &mut Cx, event: &Event) {
+        for event in event.network_responses() {
+            match &event.response {
+                NetworkResponse::HttpResponse(res) => {
+                    
+                    match event.request_id {
+                        live_id!(wasm_test)=>{
+                            let label = self.ui.label(id!(label1));
+                            println!("-----res: {:?}",res);
+                            label.set_text_and_redraw(cx,&format!("Counter: {:?}", res.headers));
+                            let data = res.get_body();
+                            if let Some(d) = data{
+                                label.set_text_and_redraw(cx,&format!("Counter: {:?}", d.len()));
+                                match read_foo_text(d){
+                                    Ok(s)=>{
+                                        label.set_text_and_redraw(cx,&format!("Counter: {:?}", s));
+                                    },
+                                    Err(e)=>{
+                                        label.set_text_and_redraw(cx,&format!("Counter: {:?}", e.to_string()));
+                                    }
+                                }
+                            }else{
+                                label.set_text_and_redraw(cx,&format!("Counter: {:?}", res.headers));
+                            }
+                        }
+                        _ =>{}
+                    }
+                }
+                _=>{}
+            }
+        }
+        
+    }
 }
-
+use std::{
+    fs::File,
+    io::prelude::*,
+    mem,
+    ptr,
+    ffi::CStr,
+    path::Path
+};
 impl AppMain for App{
     fn handle_event(&mut self, cx: &mut Cx, event: &Event) {
         if let Event::Draw(event) = event {
@@ -226,11 +266,19 @@ impl AppMain for App{
             if !self.vo{
                 self.last_value =0;
             }
+            let cache_dir = cx.os_type().get_cache_dir().unwrap();
+            let mut file = File::create(Path::new(&cache_dir).join("foo.txt")).unwrap();
+            file.write_all(b"Hello, world!").unwrap();
             self.vo=true;
             let label = self.ui.label(id!(label1));
             let mut wasm_number = add_two(self.last_value).unwrap_or(0);
             if self.vo{
-                label.set_text_and_redraw(cx,&format!("Counter: {}", wasm_number));
+                // let mut f = File::open(Path::new(&cache_dir).join("foo.txt")).unwrap();
+                // let mut data = String::from("");
+                // f.read_to_string(&mut data).unwrap();
+                let mut request = HttpRequest::new(String::from(URL), HttpMethod::GET);
+            
+                cx.http_request(live_id!(wasm_test), request);
             }else{
                 label.set_text_and_redraw(cx,&format!("niill"));
 
@@ -252,7 +300,7 @@ impl AppMain for App{
                
             ),
         );
-
+        self.handle_network_response(cx, event);
         let mut navigation = self.ui.stack_navigation(id!(navigation));
         navigation.handle_stack_view_actions(
             cx,

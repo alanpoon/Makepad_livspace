@@ -5,12 +5,15 @@ use wasmedge_sdk::{config::ConfigBuilder, params, NeverType, VmBuilder, WasmVal,
 use wasmedge_sdk::{
     config::{CommonConfigOptions, HostRegistrationConfigOptions},
     dock::{Param, VmDock},
+    plugin::{GraphEncoding,PluginManager,ExecutionTarget,NNPreload},
     Module,
 };
 use wasmedge_types::wat2wasm;
-pub const URL: &'static str  = "http://192.168.1.216:8000/wasm_test.wasm";
+//pub const URL: &'static str  = "http://192.168.1.216:8000/wasm_test.wasm";
 //pub const URL: &'static str  = "http://192.168.1.216:8000/wasm_lib.wasm";
-
+//pub const URL: &'static str  = "http://192.168.1.216:8000/wasmedge-tcp-ggml-llama-interactive.wasm";
+pub const URL: &'static str  = "http://192.168.1.216:8000/wasmedge-ws.wasm";
+pub const MODEL_URL: &'static str = "http://192.168.1.216:8000/llama-2-7b-chat-q5_k_m.gguf"; 
 const WAT: &'static [u8;121] = br#"
 (module
     (func (export "addTwo") (param i32 i32) (result i32)
@@ -64,7 +67,9 @@ pub fn read_foo_text(wasm_bytes:&Vec<u8>) -> Result<String, Box<dyn std::error::
     let preopens = vec![("/data/user/0/dev.makepad.makepad_livspace/cache")];
     let wasi_module = vm.wasi_module_mut().expect("Not found wasi module");
     wasi_module.initialize(Some(args), Some(envs), Some(preopens));
+    let extern_instance = vm.named_module("extern")?;
     let vm: VmDock = VmDock::new(vm);
+    
     match vm.run_func("read_foo_text", params!())?{
         Ok(mut res)=>{
             Ok(*res.pop().unwrap().downcast::<String>().unwrap())
@@ -72,17 +77,81 @@ pub fn read_foo_text(wasm_bytes:&Vec<u8>) -> Result<String, Box<dyn std::error::
         },
         _=>{Ok(String::from("nillz2"))}
     }
-    // let params = vec![Param::String("bindgen funcs test")];
-    // match vm.run_func("say_ok", params)? {
-    //     Ok(mut res) => Ok(format!(
-    //         "Run bindgen -- say: {} {}",
-    //         res.pop().unwrap().downcast::<String>().unwrap(),
-    //         res.pop().unwrap().downcast::<u16>().unwrap()
-    //     )),
+}
 
-    //     Err(err) => {
-    //         Ok(format!("Run bindgen -- say FAILED {}", err))
-    //     }
-    // }
-    //Ok(String::from("nill"))
+use std::{
+    fs::File,
+    fs,
+    io::prelude::*,
+    mem,
+    ptr,
+    ffi::CStr,
+    path::Path
+};
+
+pub fn tcp_test(wasm_bytes:&Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
+    let module = Module::from_bytes(None, wasm_bytes)?;    
+
+    Ok(())
+}
+
+use std::str::FromStr;
+pub fn infer(wasm_bytes:&Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
+    // parse arguments
+    let module = Module::from_bytes(None, wasm_bytes)?;    
+    let dir_mapping ="/data/user/0/dev.makepad.makepad_livspace/cache:.";
+    println!("load plugin");
+    PluginManager::load(None)?;
+    PluginManager::nn_preload(vec![NNPreload::from_str("default:GGML:AUTO:llama-2-7b-chat-q5_k_m.gguf")?]);
+    let config = ConfigBuilder::new(CommonConfigOptions::default())
+        .with_host_registration_config(HostRegistrationConfigOptions::default().wasi(true))
+        .build()?;
+    assert!(config.wasi_enabled());
+    // create a Vm
+    let mut vm = VmBuilder::new()
+        .with_config(config)
+        .with_plugin_wasi_nn()
+        .build()?
+        .register_module(Some("extern"), module)?;
+
+    // init wasi module
+    vm.wasi_module_mut()
+        // .ok_or("Not found wasi module")?
+        .expect("Not found wasi module")
+        .initialize(
+            Some(vec!["default","default"]),
+            None,
+            Some(vec![dir_mapping]),
+        );
+
+    vm.run_func(Some("extern"), "_start", params!())?;
+
+    Ok(())
+}
+
+pub fn wasm_ws(wasm_bytes:&Vec<u8>) -> Result<(), Box<dyn std::error::Error>>{
+    let module = Module::from_bytes(None, wasm_bytes)?;    
+    PluginManager::load(None)?;
+    let config = ConfigBuilder::new(CommonConfigOptions::default())
+        .with_host_registration_config(HostRegistrationConfigOptions::default().wasi(true))
+        .build()?;
+    assert!(config.wasi_enabled());
+    // create a Vm
+    let mut vm = VmBuilder::new()
+        .with_config(config)
+        .with_plugin_wasi_nn()
+        .build()?
+        .register_module(Some("extern"), module)?;
+
+    // init wasi module
+    vm.wasi_module_mut()
+        // .ok_or("Not found wasi module")?
+        .expect("Not found wasi module")
+        .initialize(
+            Some(vec!["default","default"]),
+            None,
+            None,
+        );
+    vm.run_func(Some("extern"), "_start", params!())?;
+    Ok(())
 }

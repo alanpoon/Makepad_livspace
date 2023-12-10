@@ -11,4 +11,6 @@ metadata.makepad-auto-version = "db3R5Gxh5Njhx8E-8kuZ2plQ1AI="
 makepad-widgets = { path = "../makepad/widgets", version = "0.6.0" }
 wasmedge-types = "0.4.4"
 lazy_static = "1.4.0"
-wasmedge-sdk = "0.12.0"
+wasmedge-sdk = { path ="../../wasmedge/wasmedge-rust-sdk2", features = ["wasi_nn","async"] }
+tokio = { version = "1", features = ["full"] }
+bytes = "1.5.0"

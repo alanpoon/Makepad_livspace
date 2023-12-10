@@ -3,8 +3,10 @@ use crate::home::home_screen::*;
 use crate::more::more_screen::*;
 use crate::shared::stack_navigation::*;
 use crate::shared::stack_view_action::StackViewAction;
-use crate::wasmedge_add::*;
+//use crate::wasmedge_add::*;
+use crate::wasmedge_async::*;
 use std::collections::HashMap;
+use tokio::runtime;
 live_design!{
     import makepad_widgets::base::*;
     import makepad_widgets::theme_desktop_dark::*;
@@ -61,15 +63,37 @@ live_design!{
                     width: 100, height: 30,
                     text: "zzz2mn"
                 }
-                button1 = <Button> {
-                    text: "Hello world"
+                // button0 = <Button> {
+                //     text: "Get model"
+                // }
+                model_label = <Label> {
+                    width: 300,
+                    height: Fit
+                    draw_text: {
+                        color: #f
+                    },
+                    text: "",
                 }
+                
+                message_input = <TextInput> {
+                    text: "Hi, what is the capital of america?"
+                    width: 300,
+                    height: Fit
+                    draw_bg: {
+                        color: #1
+                    }
+                }
+                button1 = <Button> {
+                    text: "Send"
+                }
+                
                 label1 = <Label> {
                     draw_text: {
                         color: #f
                     },
-                    text: "Counter: --"
+                    text: "Reply: --"
                 }
+                
                 navigation = <StackNavigation> {
                     root_view = {
                         width: Fill,
@@ -182,6 +206,8 @@ pub struct App {
     #[rust] counter: usize,
     #[rust]
     navigation_destinations: HashMap<StackViewAction, LiveId>,
+    #[rust] string_recv: ToUIReceiver<String>,
+    #[rust] input_recv: Option<std::sync::mpsc::Sender<String>>,
 }
 
 impl LiveHook for App {
@@ -198,11 +224,13 @@ impl LiveHook for App {
         crate::home::home_screen::live_design(cx);
         crate::more::more_screen::live_design(cx);
     }
-    fn after_new_from_doc(&mut self, _cx: &mut Cx) {
+    fn after_new_from_doc(&mut self, cx: &mut Cx) {
         self.init_navigation_destinations();
+        
     }
 }
-
+use std::{thread, fs};
+use std::sync::mpsc::channel;
 impl App{
     async fn _do_network_request(_cx:CxRef, _ui:WidgetRef, _url:&str)->String{
         "".to_string()
@@ -211,7 +239,6 @@ impl App{
         self.navigation_destinations = HashMap::new();
         self.navigation_destinations.insert(StackViewAction::ShowHome, live_id!(home_view));
         self.navigation_destinations.insert(StackViewAction::ShowMore, live_id!(more_view));
-
     }
     fn handle_network_response(&mut self, cx: &mut Cx, event: &Event) {
         for event in event.network_responses() {
@@ -225,21 +252,56 @@ impl App{
                             label.set_text_and_redraw(cx,&format!("Counter: {:?}", res.headers));
                             let data = res.get_body();
                             if let Some(d) = data{
-                                label.set_text_and_redraw(cx,&format!("Counter: {:?}", d.len()));
-                                match read_foo_text(d){
-                                    Ok(s)=>{
-                                        label.set_text_and_redraw(cx,&format!("Counter: {:?}", s));
-                                    },
-                                    Err(e)=>{
-                                        label.set_text_and_redraw(cx,&format!("Counter: {:?}", e.to_string()));
-                                    }
-                                }
+                                let d_c = d.clone();
+                                label.set_text_and_redraw(cx,&format!("Counter: start"));
+                               
+                                label.set_text_and_redraw(cx,&format!("Counter: end"));
+                                // match read_foo_text(d){
+                                //     Ok(s)=>{
+                                //         label.set_text_and_redraw(cx,&format!("Counter: {:?}", s));
+                                //     },
+                                //     Err(e)=>{
+                                //         label.set_text_and_redraw(cx,&format!("Counter: {:?}", e.to_string()));
+                                //     }
+                                // }
                             }else{
                                 label.set_text_and_redraw(cx,&format!("Counter: {:?}", res.headers));
                             }
                         }
+                        live_id!(model)=>{
+                            let data = res.get_body().unwrap();
+                            let label = self.ui.label(id!(model_label));
+                            label.set_text_and_redraw(cx,"http fetch");
+
+                            let cache_dir: String = cx.os_type().get_cache_dir().unwrap();
+
+                            fs::write(Path::new(&cache_dir).join(Path::new("tinyllama-1.1b-chat-v0.3.Q5_K_M.gguf")), data).unwrap();
+                            label.set_text_and_redraw(cx,"after");
+
+                        }
                         _ =>{}
                     }
+                }
+                NetworkResponse::WebSocketOpen=>{
+                    match event.request_id {
+                        live_id!(ws)=>{
+                            let label: LabelRef = self.ui.label(id!(label1));
+                            label.set_text_and_redraw(cx, "open");
+                            cx.web_socket_send_binary(live_id!(ws_msg), b"hello".to_vec())
+                        }
+                        _=>{}
+                    }
+
+                }
+                NetworkResponse::WebSocketBinary(bin) => {
+                    let label = self.ui.label(id!(label1));
+                    label.set_text_and_redraw(cx,std::str::from_utf8(bin).unwrap_or("default"));
+
+                }
+                NetworkResponse::WebSocketError(e)=>{
+                    let label = self.ui.label(id!(label1));
+                    label.set_text_and_redraw(cx,e);
+
                 }
                 _=>{}
             }
@@ -255,35 +317,115 @@ use std::{
     ffi::CStr,
     path::Path
 };
+use std::net::TcpStream;
+use std::sync::{Arc,Mutex};
+lazy_static!{
+    pub static ref ONCE : Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+}
 impl AppMain for App{
     fn handle_event(&mut self, cx: &mut Cx, event: &Event) {
         if let Event::Draw(event) = event {
             return self.ui.draw_widget_all(&mut Cx2d::new(cx, event));
         }
-        
+        if let Event::Signal =event {
+            while let Ok(s) = self.string_recv.try_recv() {
+                let label: LabelRef = self.ui.label(id!(label1));
+                label.set_text_and_redraw(cx, &s);
+                return
+            }
+        }
         let actions = self.ui.handle_widget_event(cx, event);
-        if self.ui.button(id!(button1)).clicked(&actions) {
-            if !self.vo{
-                self.last_value =0;
-            }
-            let cache_dir = cx.os_type().get_cache_dir().unwrap();
-            let mut file = File::create(Path::new(&cache_dir).join("foo.txt")).unwrap();
-            file.write_all(b"Hello, world!").unwrap();
-            self.vo=true;
-            let label = self.ui.label(id!(label1));
-            let mut wasm_number = add_two(self.last_value).unwrap_or(0);
-            if self.vo{
-                // let mut f = File::open(Path::new(&cache_dir).join("foo.txt")).unwrap();
-                // let mut data = String::from("");
-                // f.read_to_string(&mut data).unwrap();
-                let mut request = HttpRequest::new(String::from(URL), HttpMethod::GET);
-            
-                cx.http_request(live_id!(wasm_test), request);
+        
+        if self.ui.button(id!(button0)).clicked(&actions) {
+            let cache_dir: String = cx.os_type().get_cache_dir().unwrap();
+            if fetch_if_noexist(MODEL_URL.into(),cache_dir){
+                let request = HttpRequest::new(String::from(MODEL_URL), HttpMethod::GET);
+                cx.http_request(live_id!(model), request);
+                let label: LabelRef = self.ui.label(id!(model_label));
+                label.set_text_and_redraw(cx,"fetching");
             }else{
-                label.set_text_and_redraw(cx,&format!("niill"));
-
+                let label: LabelRef = self.ui.label(id!(model_label));
+                label.set_text_and_redraw(cx,"found model");
             }
-            self.last_value =wasm_number;
+        }
+        if self.ui.button(id!(button1)).clicked(&actions) {
+            let mut user_prompt = self.ui.text_input(id!(message_input)).text();
+            user_prompt+="\n";
+            if let Some(s) = &self.input_recv{
+                let label: LabelRef = self.ui.label(id!(label1));
+                
+                match s.send(user_prompt){
+                    Ok(z)=>{
+                        label.set_text_and_redraw(cx, "sending");
+                    }
+                    Err(e)=>{
+                        label.set_text_and_redraw(cx, &format!("e{:?}",e.to_string()));
+                    }
+                }
+            }else{
+                if let Ok(ref mut k) = ONCE.clone().lock(){
+                    let b = k.clone();
+                    if !b{
+                        let label: LabelRef = self.ui.label(id!(label1));
+                        label.set_text_and_redraw(cx, "once");
+                      
+                        let string_sender_c: ToUISender<String> = self.string_recv.sender().clone();
+                        let string_sender_c2: ToUISender<String> = self.string_recv.sender().clone();
+                        let (s,r) = std::sync::mpsc::channel();
+                        cx.spawn_thread(move||{
+                            
+                            let rt = runtime::Runtime::new().unwrap();
+                            //string_sender_c2.send(String::from("rt"));
+                            let s = rt.block_on(zzz(string_sender_c,r));
+                            //string_sender_c2.send(s.unwrap_or(String::from("fff")));
+                        });
+                        
+                        self.input_recv = Some(s.clone());
+                        match s.send(user_prompt){
+                            Ok(z)=>{
+                                label.set_text_and_redraw(cx, "sending");
+                            }
+                            Err(e)=>{
+                                label.set_text_and_redraw(cx, &format!("e{:?}",e.to_string()));
+                            }
+                        }
+                        **k = true
+                    }else{
+                        // let label: LabelRef = self.ui.label(id!(label1));
+                        // label.set_text_and_redraw(cx, "done");
+                    }
+                }
+            }
+            
+        //---
+            
+            
+            // let mut file = File::create(Path::new(&cache_dir).join("foo.txt")).unwrap();
+            // file.write_all(b"Hello, world!").unwrap();
+            // self.vo=true;
+            // let mut wasm_number = add_two(self.last_value).unwrap_or(0);
+            
+            //     // let mut f = File::open(Path::new(&cache_dir).join("foo.txt")).unwrap();
+            //     // let mut data = String::from("");
+            //     // f.read_to_string(&mut data).unwrap();
+            let mut wasm_test_exists = false;
+            let mut model_exists = false;
+            // if fetch_if_noexist(String::from(URL), cache_dir.clone()){
+            //     let request = HttpRequest::new(String::from(URL), HttpMethod::GET);
+            //     cx.http_request(live_id!(wasm_test), request);
+            // }else{
+            //     wasm_test_exists = true;
+            // }
+            // if fetch_if_noexist(String::from(MODEL_URL), cache_dir){
+            //     let request = HttpRequest::new(String::from(MODEL_URL), HttpMethod::GET);
+            //     cx.http_request(live_id!(model), request);
+            // }else{
+            //     model_exists = true;
+            // }
+            // if wasm_test_exists && model_exists{
+                
+            // }
+            // self.last_value =wasm_number;
         }
         self.ui.radio_button_set(ids!(
             mobile_modes.tab1,
